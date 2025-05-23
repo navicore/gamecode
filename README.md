@@ -22,6 +22,14 @@ GameCode follows a modular, clean architecture with clear separation of concerns
 └─────────────────┘    └──────────────────┘    └──────────────────┘
 ```
 
+[gamecode-cli](https://github.com/navicore/gamecode-cli)
+[gamecode-tools](https://github.com/navicore/gamecode-tools)
+[gamecode-backend](https://github.com/navicore/gamecode-backend)
+[gamecode-bedrock](https://github.com/navicore/gamecode-bedrock)
+[gamecode-context](https://github.com/navicore/gamecode-context)
+[gamecode-prompt](https://github.com/navicore/gamecode-prompt)
+[gamecode-desktop](https://github.com/navicore/gamecode-desktop)
+
 ### Core Design Principles
 
 - **Backend Agnostic**: Clean trait abstraction allows multiple LLM providers
