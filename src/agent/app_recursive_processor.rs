@@ -90,8 +90,10 @@ async fn process_tool_chain(
             }
         }
 
-        // Execute the tool
-        match agent_manager.tool_registry.execute_tool(&tool_call.name, &args).await {
+        // Execute the tool using the new GamecodeBridge
+        // Convert the args HashMap<String, Value> to a single Value
+        let args_value = serde_json::to_value(&tool_call.args).unwrap_or_default();
+        match agent_manager.backend.execute_tool(&tool_call.name, &args_value).await {
             Ok(result) => {
                 // Create a tool result
                 tool_results.push(ToolResult {

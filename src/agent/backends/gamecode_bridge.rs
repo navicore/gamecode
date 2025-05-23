@@ -17,6 +17,9 @@ pub struct GamecodeBridge {
     /// Gamecode tools dispatcher
     tool_dispatcher: Dispatcher,
     
+    /// Tool schema registry (same instance as dispatcher)
+    tool_schema_registry: gamecode_tools::schema::ToolSchemaRegistry,
+    
     /// Current session ID
     session_id: Uuid,
     
@@ -27,13 +30,14 @@ pub struct GamecodeBridge {
 impl GamecodeBridge {
     pub async fn new(region: &str, profile: Option<String>) -> Result<Self, BackendError> {
         let backend = BedrockBackend::new().await.map_err(|e| BackendError::NetworkError { message: e.to_string() })?;
-        let tool_dispatcher = gamecode_tools::create_bedrock_dispatcher();
+        let (tool_dispatcher, tool_schema_registry) = gamecode_tools::create_bedrock_dispatcher_with_schemas();
         let session_id = Uuid::new_v4();
         let retry_config = RetryConfig::default();
         
         Ok(Self {
             backend,
             tool_dispatcher,
+            tool_schema_registry,
             session_id,
             retry_config,
         })
@@ -106,9 +110,8 @@ impl Backend for GamecodeBridge {
         // Parse the context to extract messages - assume it's formatted properly
         let messages = vec![Self::convert_to_backend_message("user", prompt)];
         
-        // Get available tools from gamecode-tools
-        let (_dispatcher, schema_registry) = gamecode_tools::create_bedrock_dispatcher_with_schemas();
-        let tool_specs = schema_registry.to_bedrock_specs();
+        // Get available tools from our stored schema registry
+        let tool_specs = self.tool_schema_registry.to_bedrock_specs();
         
         let tools: Vec<BackendTool> = tool_specs.into_iter()
             .map(|spec| BackendTool {
