@@ -1,4 +1,4 @@
-use crate::agent::backends::{Backend, BackendCore, BedrockBackend, BedrockModel};
+use crate::agent::backends::{Backend, BackendCore, GamecodeBridge};
 use crate::agent::context::ContextManager;
 use crate::agent::tools::ToolRegistry;
 // Removed regex dependency
@@ -9,9 +9,9 @@ use tracing::{error, info, trace, warn};
 /// Central manager for the AI agent
 pub struct AgentManager {
     /// The currently active backend for LLM processing
-    pub backend: BedrockBackend,
+    pub backend: GamecodeBridge,
 
-    /// Tool registry for managing available tools
+    /// Tool registry for managing available tools (keeping for compatibility)
     pub tool_registry: ToolRegistry,
 
     /// Context manager for maintaining conversation state
@@ -57,19 +57,26 @@ impl Default for AgentConfig {
 impl AgentManager {
     /// Create a new agent manager with default settings
     pub fn new() -> Self {
+        let config = AgentConfig::default();
+        let backend = GamecodeBridge::new(&config.aws_region, config.aws_profile.clone())
+            .expect("Failed to create GamecodeBridge");
+            
         Self {
-            backend: BedrockBackend::new(),
+            backend,
             tool_registry: ToolRegistry::new(),
             context_manager: ContextManager::new(),
-            config: AgentConfig::default(),
+            config,
             initialized: false,
         }
     }
 
     /// Create a new agent manager with custom configuration
     pub fn with_config(config: AgentConfig) -> Self {
+        let backend = GamecodeBridge::new(&config.aws_region, config.aws_profile.clone())
+            .expect("Failed to create GamecodeBridge");
+            
         Self {
-            backend: BedrockBackend::new(),
+            backend,
             tool_registry: ToolRegistry::new(),
             context_manager: ContextManager::new(),
             config,
@@ -89,21 +96,13 @@ impl AgentManager {
 
     /// Initialize the agent manager
     pub async fn init(&mut self) -> Result<(), String> {
-        // Initialize backend with AWS configuration
-        let mut backend_config = self.backend.config().clone();
-        backend_config.region = self.config.aws_region.clone();
-        if let Some(profile) = &self.config.aws_profile {
-            backend_config.use_profile = true;
-            backend_config.profile_name = Some(profile.clone());
-        }
-
-        // Create a new backend with updated config
-        self.backend = BedrockBackend::with_config(backend_config);
-
-        // Initialize the backend
-        self.backend.init().await?;
-
+        info!("Initializing AgentManager with GamecodeBridge");
+        
+        // The GamecodeBridge handles initialization internally
+        // No additional initialization needed for the modular architecture
+        
         self.initialized = true;
+        info!("AgentManager initialization complete");
         Ok(())
     }
     
@@ -239,9 +238,22 @@ impl AgentManager {
         let mut results = Vec::new();
 
         for tool_call in tool_calls {
-            let result = self
-                .tool_registry
-                .execute_tool(&tool_call.name, &tool_call.args)
+            // Convert args to JSON Value for the bridge
+            let args_json = if let Some(ref args_map) = tool_call.args_json {
+                serde_json::to_value(args_map).unwrap_or(Value::Object(serde_json::Map::new()))
+            } else {
+                // Fallback: convert string args to JSON
+                let mut args_map = serde_json::Map::new();
+                for arg in &tool_call.args {
+                    if let Some((key, value)) = arg.split_once('=') {
+                        args_map.insert(key.to_string(), Value::String(value.to_string()));
+                    }
+                }
+                Value::Object(args_map)
+            };
+            
+            let result = self.backend
+                .execute_tool(&tool_call.name, &args_json)
                 .await
                 .map_err(|e| format!("Tool execution error: {}", e))?;
 
@@ -279,14 +291,8 @@ impl AgentManager {
     /// Compress context if it gets too large
     async fn maybe_compress_context(&mut self) -> Result<(), String> {
         if self.context_manager.context_length() > self.config.max_context_length {
-            // Store the original model
-            let original_model = self.backend.current_model();
-
-            // Use the fast model (haiku) for context compression
-            if self.config.use_fast_model_for_context {
-                // Switch to Haiku for summarization
-                self.backend.switch_model(BedrockModel::Haiku);
-            }
+            // Note: In the modular architecture, model selection is handled by the backend
+            // We'll use the same backend for compression - it will use appropriate models internally
 
             // Get the current context
             let context = self.context_manager.get_context();
@@ -307,10 +313,7 @@ impl AgentManager {
             self.context_manager
                 .replace_with_summary(&summary_response.content);
 
-            // Switch back to original model if we changed it
-            if self.config.use_fast_model_for_context {
-                self.backend.switch_model(original_model);
-            }
+            // Note: Model switching is handled internally by the backend
         }
 
         Ok(())

@@ -1,6 +1,8 @@
 mod bedrock;
+mod gamecode_bridge;
 
 pub use bedrock::{BedrockBackend, BedrockConfig, BedrockModel, ToolUse};
+pub use gamecode_bridge::GamecodeBridge;
 use tracing::trace;
 
 /// Initialize all available backends
