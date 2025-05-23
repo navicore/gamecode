@@ -32,6 +32,7 @@ pub struct AppState {
 
     // Agent state
     agent_manager: Option<Arc<Mutex<AgentManager>>>,
+    agent_config: Option<AgentConfig>,
     agent_initialized: bool,
     processing_input: bool,
 }
@@ -120,6 +121,7 @@ impl Default for AppState {
             show_settings: false,
             dark_mode: true,
             agent_manager: None,
+            agent_config: None,
             agent_initialized: false,
             processing_input: false,
         }
@@ -188,9 +190,8 @@ fn initialize_agent_system(mut app_state: ResMut<AppState>) {
             aws_profile: None,
         };
 
-        // Create agent manager with config
-        let agent_manager = AgentManager::with_config(config);
-        app_state.agent_manager = Some(Arc::new(Mutex::new(agent_manager)));
+        // Store config for later async initialization
+        app_state.agent_config = Some(config);
 
         // Add a system message to the journal
         app_state.journal_messages.push(JournalMessage {
@@ -638,8 +639,17 @@ fn ui_system(
                             // Mark that we're processing input
                             app_state.processing_input = true;
 
-                            // Make sure we have an agent manager
-                            if let Some(agent_manager) = app_state.agent_manager.clone() {
+                            // Check that we have config available
+                            if app_state.agent_config.is_none() {
+                                app_state.journal_messages.push(JournalMessage {
+                                    content: "Error: Agent not configured properly".to_string(),
+                                    sender: MessageSender::System,
+                                    timestamp: current_time,
+                                });
+                                return;
+                            }
+                            
+                            {
                                 // Create a clone of the input for the async task
                                 let input_clone = input_text.clone();
 
@@ -659,7 +669,8 @@ fn ui_system(
                                 agent_task.receiver = Some(receiver);
 
                                 // Clone what we need for the tokio task
-                                let agent_manager_clone = agent_manager.clone();
+                                let agent_manager_clone = app_state.agent_manager.clone();
+                                let agent_config_clone = app_state.agent_config.clone();
 
                                 // Create a tokio runtime for this task
                                 let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -676,8 +687,20 @@ fn ui_system(
                                 std::thread::spawn(move || {
                                     // Block on the async task within the runtime
                                     runtime.block_on(async {
+                                        // Create or get the agent manager
+                                        let agent_manager_arc = if let Some(existing) = agent_manager_clone {
+                                            existing
+                                        } else if let Some(config) = agent_config_clone {
+                                            // Create the agent manager asynchronously
+                                            let new_agent = AgentManager::with_config(config).await;
+                                            Arc::new(Mutex::new(new_agent))
+                                        } else {
+                                            error!("No agent config available");
+                                            return;
+                                        };
+                                        
                                         // Get a lock on the agent manager
-                                        let mut agent_manager = agent_manager_clone.lock().await;
+                                        let mut agent_manager = agent_manager_arc.lock().await;
 
                                         // Initialize if not already done
                                         if !agent_manager.is_initialized() {

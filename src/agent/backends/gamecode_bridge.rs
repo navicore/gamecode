@@ -1,11 +1,10 @@
 use async_trait::async_trait;
-use gamecode_backend::{LLMBackend, ChatRequest, ChatResponse, Message as BackendMessage, Tool as BackendTool, BackendError, StatusCallback};
+use gamecode_backend::{LLMBackend, ChatRequest, Message as BackendMessage, Tool as BackendTool, BackendError, RetryConfig, MessageRole};
 use gamecode_bedrock::BedrockBackend;
-use gamecode_tools::{ToolRegistry as GamecodeToolRegistry, ToolResult as GamecodeToolResult};
+use gamecode_tools::jsonrpc::Dispatcher;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::Arc;
-use tracing::{error, info, trace, warn};
+use tracing::{error, trace};
 use uuid::Uuid;
 
 use super::{Backend, BackendCore, BackendResponse, ToolUse};
@@ -15,89 +14,81 @@ pub struct GamecodeBridge {
     /// The modular gamecode backend
     backend: BedrockBackend,
     
-    /// Gamecode tools registry
-    tools: GamecodeToolRegistry,
+    /// Gamecode tools dispatcher
+    tool_dispatcher: Dispatcher,
     
     /// Current session ID
     session_id: Uuid,
     
-    /// Status callback for UI feedback
-    status_callback: Option<StatusCallback>,
+    /// Retry configuration
+    retry_config: RetryConfig,
 }
 
 impl GamecodeBridge {
-    pub fn new(region: &str, profile: Option<String>) -> Result<Self, BackendError> {
-        let backend = BedrockBackend::new(region.to_string(), profile)?;
-        let tools = GamecodeToolRegistry::new();
+    pub async fn new(region: &str, profile: Option<String>) -> Result<Self, BackendError> {
+        let backend = BedrockBackend::new().await.map_err(|e| BackendError::NetworkError { message: e.to_string() })?;
+        let tool_dispatcher = gamecode_tools::create_bedrock_dispatcher();
         let session_id = Uuid::new_v4();
+        let retry_config = RetryConfig::default();
         
         Ok(Self {
             backend,
-            tools,
+            tool_dispatcher,
             session_id,
-            status_callback: None,
+            retry_config,
         })
-    }
-    
-    pub fn with_status_callback(mut self, callback: StatusCallback) -> Self {
-        self.status_callback = Some(callback);
-        self
     }
     
     /// Convert desktop UI message format to backend message format
     fn convert_to_backend_message(role: &str, content: &str) -> BackendMessage {
-        BackendMessage {
-            role: role.to_string(),
-            content: content.to_string(),
-        }
+        let message_role = match role {
+            "user" => MessageRole::User,
+            "assistant" => MessageRole::Assistant,
+            "system" => MessageRole::System,
+            _ => MessageRole::User, // Default fallback
+        };
+        BackendMessage::text(message_role, content)
     }
     
-    /// Parse tool calls from the backend response content
-    fn parse_tool_calls_from_response(&self, content: &str) -> Vec<ToolUse> {
-        let mut tool_calls = Vec::new();
-        
-        // Try to parse tool calls from the response content
-        // This depends on the format returned by the backend
-        if let Ok(parsed) = serde_json::from_str::<Value>(content) {
-            if let Some(tools) = parsed.get("tool_calls").and_then(|t| t.as_array()) {
-                for tool in tools {
-                    if let (Some(name), Some(args)) = (
-                        tool.get("name").and_then(|n| n.as_str()),
-                        tool.get("arguments")
-                    ) {
-                        // Convert to HashMap format expected by ToolUse
-                        let mut args_map = HashMap::new();
-                        if let Some(obj) = args.as_object() {
-                            for (k, v) in obj {
-                                args_map.insert(k.clone(), v.to_string());
-                            }
-                        }
-                        
-                        tool_calls.push(ToolUse {
-                            name: name.to_string(),
-                            args: args_map,
-                            id: tool.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()),
-                        });
-                    }
+    /// Convert backend tool calls to UI format
+    fn convert_tool_calls_to_ui(&self, tool_calls: &[gamecode_backend::ToolCall]) -> Vec<ToolUse> {
+        tool_calls.iter().map(|tc| {
+            // Convert JSON Value to HashMap<String, Value> for UI compatibility
+            let mut args_map = HashMap::new();
+            if let Some(obj) = tc.input.as_object() {
+                for (k, v) in obj {
+                    args_map.insert(k.clone(), v.clone());
                 }
             }
-        }
-        
-        tool_calls
+            
+            ToolUse {
+                name: tc.name.clone(),
+                args: args_map,
+                id: Some(tc.id.clone()),
+            }
+        }).collect()
     }
     
-    /// Execute a tool using the gamecode-tools registry
+    /// Execute a tool using the gamecode-tools JSONRPC dispatcher
     pub async fn execute_tool(&self, tool_name: &str, arguments: &Value) -> Result<String, String> {
         trace!("Executing tool: {} with args: {}", tool_name, arguments);
         
-        match self.tools.execute_tool(tool_name, arguments.clone()).await {
-            Ok(GamecodeToolResult::Success(result)) => {
-                info!("Tool {} executed successfully", tool_name);
-                Ok(result)
-            }
-            Ok(GamecodeToolResult::Error(err)) => {
-                warn!("Tool {} failed: {}", tool_name, err);
-                Err(err)
+        // Create JSONRPC request
+        let jsonrpc_request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": tool_name,
+            "params": arguments,
+            "id": 1
+        });
+        
+        let request_str = serde_json::to_string(&jsonrpc_request)
+            .map_err(|e| format!("Failed to serialize JSONRPC request: {}", e))?;
+        
+        // Execute via dispatcher
+        match self.tool_dispatcher.dispatch(&request_str).await {
+            Ok(response) => {
+                trace!("Tool {} executed successfully", tool_name);
+                Ok(response)
             }
             Err(e) => {
                 error!("Tool execution error: {}", e);
@@ -113,35 +104,47 @@ impl Backend for GamecodeBridge {
         trace!("Generating response for prompt: {} chars", prompt.len());
         
         // Parse the context to extract messages - assume it's formatted properly
-        let messages = vec![BackendMessage {
-            role: "user".to_string(),
-            content: prompt.to_string(),
-        }];
+        let messages = vec![Self::convert_to_backend_message("user", prompt)];
         
         // Get available tools from gamecode-tools
-        let tools: Vec<BackendTool> = self.tools.get_all_tool_schemas().into_iter()
-            .map(|schema| BackendTool {
-                name: schema.name,
-                description: schema.description,
-                parameters: schema.parameters,
+        let (_dispatcher, schema_registry) = gamecode_tools::create_bedrock_dispatcher_with_schemas();
+        let tool_specs = schema_registry.to_bedrock_specs();
+        
+        let tools: Vec<BackendTool> = tool_specs.into_iter()
+            .map(|spec| BackendTool {
+                name: spec.name,
+                description: spec.description,
+                input_schema: spec.input_schema.json, // Extract the JSON Value from BedrockInputSchema
             })
             .collect();
         
         let request = ChatRequest {
             messages,
+            model: None, // Let backend choose the model
             tools: Some(tools),
-            session_id: Some(self.session_id.to_string()),
+            inference_config: None, // Use backend defaults
+            session_id: Some(self.session_id),
+            status_callback: None, // Status handled elsewhere
         };
         
-        match self.backend.chat_with_retry(request, self.status_callback.as_ref()).await {
+        match self.backend.chat_with_retry(request, self.retry_config.clone()).await {
             Ok(response) => {
-                // Parse tool calls from response
-                let tool_calls = self.parse_tool_calls_from_response(&response.content);
+                // Convert tool calls from backend format to UI format
+                let tool_calls = self.convert_tool_calls_to_ui(&response.tool_calls);
+                
+                // Extract text content from message
+                let content = response.message.content.iter()
+                    .filter_map(|block| match block {
+                        gamecode_backend::ContentBlock::Text(text) => Some(text.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
                 
                 let backend_response = BackendResponse {
-                    content: response.content,
-                    model: "claude-3-7-sonnet".to_string(),
-                    tokens_used: None,
+                    content,
+                    model: response.model,
+                    tokens_used: response.usage.map(|u| u.total_tokens as usize),
                     tool_calls,
                 };
                 

@@ -25,6 +25,7 @@ pub struct AgentManager {
 }
 
 /// Configuration settings for the agent
+#[derive(Clone)]
 pub struct AgentConfig {
     /// Whether to use the fast model for context management
     pub use_fast_model_for_context: bool,
@@ -56,9 +57,10 @@ impl Default for AgentConfig {
 
 impl AgentManager {
     /// Create a new agent manager with default settings
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         let config = AgentConfig::default();
         let backend = GamecodeBridge::new(&config.aws_region, config.aws_profile.clone())
+            .await
             .expect("Failed to create GamecodeBridge");
             
         Self {
@@ -71,8 +73,9 @@ impl AgentManager {
     }
 
     /// Create a new agent manager with custom configuration
-    pub fn with_config(config: AgentConfig) -> Self {
+    pub async fn with_config(config: AgentConfig) -> Self {
         let backend = GamecodeBridge::new(&config.aws_region, config.aws_profile.clone())
+            .await
             .expect("Failed to create GamecodeBridge");
             
         Self {
