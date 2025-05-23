@@ -5,6 +5,16 @@ Bedrock Claude 3.7 and Haiku 3.5 models. GameCode provides a clean, trait-based
 architecture for LLM backends with comprehensive tool support and session
 management.
 
+Individual Components each in their own repository:
+
+* [gamecode-cli](https://github.com/navicore/gamecode-cli)
+* [gamecode-tools](https://github.com/navicore/gamecode-tools)
+* [gamecode-backend](https://github.com/navicore/gamecode-backend)
+* [gamecode-bedrock](https://github.com/navicore/gamecode-bedrock)
+* [gamecode-context](https://github.com/navicore/gamecode-context)
+* [gamecode-prompt](https://github.com/navicore/gamecode-prompt)
+* [gamecode-desktop](https://github.com/navicore/gamecode-desktop)
+
 ## 🏗️ Architecture Overview
 
 GameCode follows a modular, clean architecture with clear separation of concerns:
@@ -21,14 +31,6 @@ GameCode follows a modular, clean architecture with clear separation of concerns
 │ (JSONRPC Tools) │    │ (Context Mgmt)   │    │(Prompt Templates)│
 └─────────────────┘    └──────────────────┘    └──────────────────┘
 ```
-
-[gamecode-cli](https://github.com/navicore/gamecode-cli)
-[gamecode-tools](https://github.com/navicore/gamecode-tools)
-[gamecode-backend](https://github.com/navicore/gamecode-backend)
-[gamecode-bedrock](https://github.com/navicore/gamecode-bedrock)
-[gamecode-context](https://github.com/navicore/gamecode-context)
-[gamecode-prompt](https://github.com/navicore/gamecode-prompt)
-[gamecode-desktop](https://github.com/navicore/gamecode-desktop)
 
 ### Core Design Principles
 
