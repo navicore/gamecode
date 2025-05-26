@@ -7,6 +7,7 @@ management.
 
 Individual Components each in their own repository:
 
+* [gamecode-mcp](https://github.com/navicore/gamecode-mcp)
 * [gamecode-cli](https://github.com/navicore/gamecode-cli)
 * [gamecode-tools](https://github.com/navicore/gamecode-tools)
 * [gamecode-backend](https://github.com/navicore/gamecode-backend)
@@ -31,6 +32,14 @@ GameCode follows a modular, clean architecture with clear separation of concerns
 │ (JSONRPC Tools) │    │ (Context Mgmt)   │    │(Prompt Templates)│
 └─────────────────┘    └──────────────────┘    └──────────────────┘
 ```
+
+Note, [gamecode-mcp](https://github.com/navicore/gamecode-mcp) is not integrated
+into the above yet - it is a working standalone mcp server that currently works
+as is with [claude-code](https://www.anthropic.com/claude-code).  Soon,
+`gamecode-tools` will be reimplemented to populate `gamecode-mcp` tools
+registry and `gamecode-cli/ui` will be refactored to use `gamecode-mcp` and
+any other completion mcp implementation.
+
 
 ### Core Design Principles
 
