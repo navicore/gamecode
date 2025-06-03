@@ -8,6 +8,7 @@ management.
 Individual Components each in their own repository:
 
 * [gamecode-mcp](https://github.com/navicore/gamecode-mcp)
+* [gamecode-mcp2](https://github.com/navicore/gamecode-mcp2)
 * [gamecode-cli](https://github.com/navicore/gamecode-cli)
 * [gamecode-tools](https://github.com/navicore/gamecode-tools)
 * [gamecode-backend](https://github.com/navicore/gamecode-backend)
