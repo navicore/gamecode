@@ -1,3 +1,8 @@
+<!-- ghmig:moved -->
+> **This repository has moved to [https://git.navicore.tech/navicore/gamecode](https://git.navicore.tech/navicore/gamecode).**
+>
+> The GitHub copy is archived and no longer maintained.
+
 # GameCode - Agentic AI Development Platform
 
 An experimental, modular platform for building agentic AI assistants with AWS
@@ -222,4 +227,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Contributions**: PRs welcome
 
 ---
-
